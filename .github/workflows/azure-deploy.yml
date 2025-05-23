@@ -134,7 +134,7 @@ jobs:
               SCM_DO_BUILD_DURING_DEPLOYMENT=false \
               ENABLE_ORYX_BUILD=false \
               PORT=8080 \
-              WEBSITE_RUN_FROM_PACKAGE=1
+              WEBSITE_RUN_FROM_PACKAGE=0
 
           # Configure startup file for frontend (use Node.js server)
           az webapp config set \
@@ -155,10 +155,25 @@ jobs:
         cd frontend
         # Use npm install instead of npm ci to handle package-lock.json sync issues
         npm install
+        # Build the frontend (this will run the postbuild script automatically)
         npm run build
+        # Verify that the dist folder has the required files
+        echo "Checking dist folder contents..."
+        ls -la dist/
+        echo "Checking if server.js exists in dist..."
+        ls -la dist/server.js || echo "❌ server.js not found in dist"
+        echo "Checking if package.json exists in dist..."
+        ls -la dist/package.json || echo "❌ package.json not found in dist"
         # Install production dependencies in the dist folder for deployment
         cd dist
-        npm install --omit=dev
+        # Only install if package.json exists
+        if [ -f package.json ]; then
+          npm install --omit=dev
+          echo "✅ Dependencies installed in dist folder"
+        else
+          echo "❌ No package.json found in dist folder"
+          exit 1
+        fi
       env:
         VITE_API_URL: https://${{ env.AZURE_BACKEND_APP }}.azurewebsites.net
     
@@ -184,42 +199,74 @@ jobs:
       uses: azure/CLI@v1
       with:
         inlineScript: |
-          echo "Checking backend health..."
+          echo "🚀 Starting deployment verification..."
           backend_url="https://${{ env.AZURE_BACKEND_APP }}.azurewebsites.net"
           frontend_url="https://${{ env.AZURE_FRONTEND_APP }}.azurewebsites.net"
           
-          # Wait a moment for deployment to complete
-          sleep 30
+          echo "Backend URL: $backend_url"
+          echo "Frontend URL: $frontend_url"
           
-          # Check backend health
-          if curl -f "$backend_url/health"; then
-            echo "✅ Backend is healthy"
-          else
-            echo "❌ Backend health check failed"
-            az webapp log download --resource-group ${{ env.AZURE_RG_NAME }} --name ${{ env.AZURE_BACKEND_APP }}
-          fi
+          # Wait longer for deployment to complete
+          echo "⏳ Waiting 60 seconds for deployment to complete..."
+          sleep 60
+          
+          # Check backend health with retries
+          echo "🔍 Checking backend health..."
+          backend_attempts=0
+          backend_max_attempts=5
+          while [ $backend_attempts -lt $backend_max_attempts ]; do
+            backend_attempts=$((backend_attempts + 1))
+            echo "Backend attempt $backend_attempts/$backend_max_attempts..."
+            
+            if curl -f -s --max-time 30 "$backend_url/health"; then
+              echo "✅ Backend is healthy"
+              break
+            else
+              echo "❌ Backend health check failed (attempt $backend_attempts)"
+              if [ $backend_attempts -eq $backend_max_attempts ]; then
+                echo "📋 Downloading backend logs for debugging..."
+                az webapp log download --resource-group ${{ env.AZURE_RG_NAME }} --name ${{ env.AZURE_BACKEND_APP }} || echo "Failed to download backend logs"
+              else
+                echo "⏳ Waiting 30 seconds before retry..."
+                sleep 30
+              fi
+            fi
+          done
           
           echo ""
-          echo "Checking frontend health..."
-          
-          # Check frontend health endpoint first
-          if curl -f "$frontend_url/health"; then
-            echo "✅ Frontend health endpoint is working"
-          else
-            echo "⚠️ Frontend health endpoint failed, checking main page..."
-          fi
-          
-          # Check frontend main page
-          if curl -f "$frontend_url"; then
-            echo "✅ Frontend is accessible"
-          else
-            echo "❌ Frontend accessibility check failed"
-            echo "📋 Downloading frontend logs for debugging..."
-            az webapp log download --resource-group ${{ env.AZURE_RG_NAME }} --name ${{ env.AZURE_FRONTEND_APP }}
+          echo "🔍 Checking frontend health..."
+          frontend_attempts=0
+          frontend_max_attempts=5
+          while [ $frontend_attempts -lt $frontend_max_attempts ]; do
+            frontend_attempts=$((frontend_attempts + 1))
+            echo "Frontend attempt $frontend_attempts/$frontend_max_attempts..."
             
-            echo "📊 Checking app status..."
-            az webapp show --resource-group ${{ env.AZURE_RG_NAME }} --name ${{ env.AZURE_FRONTEND_APP }} --query "{state:state,hostNames:defaultHostName}" --output table
-          fi
+            # Check frontend health endpoint first
+            if curl -f -s --max-time 30 "$frontend_url/health"; then
+              echo "✅ Frontend health endpoint is working"
+              break
+            else
+              echo "⚠️ Frontend health endpoint failed, checking main page..."
+              
+              # Check frontend main page
+              if curl -f -s --max-time 30 "$frontend_url"; then
+                echo "✅ Frontend main page is accessible"
+                break
+              else
+                echo "❌ Frontend accessibility check failed (attempt $frontend_attempts)"
+                if [ $frontend_attempts -eq $frontend_max_attempts ]; then
+                  echo "📋 Downloading frontend logs for debugging..."
+                  az webapp log download --resource-group ${{ env.AZURE_RG_NAME }} --name ${{ env.AZURE_FRONTEND_APP }} || echo "Failed to download frontend logs"
+                  
+                  echo "📊 Checking app status..."
+                  az webapp show --resource-group ${{ env.AZURE_RG_NAME }} --name ${{ env.AZURE_FRONTEND_APP }} --query "{state:state,hostNames:defaultHostName}" --output table
+                else
+                  echo "⏳ Waiting 30 seconds before retry..."
+                  sleep 30
+                fi
+              fi
+            fi
+          done
           
           echo ""
           echo "🔗 Application URLs:"
@@ -227,3 +274,7 @@ jobs:
           echo "Backend Health: $backend_url/health"
           echo "Frontend URL: $frontend_url"
           echo "Frontend Health: $frontend_url/health"
+          
+          echo ""
+          echo "📊 Final status check..."
+          az webapp list --resource-group ${{ env.AZURE_RG_NAME }} --query "[].{name:name,state:state,defaultHostName:defaultHostName}" --output table
