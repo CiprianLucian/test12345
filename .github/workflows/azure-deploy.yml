@@ -134,7 +134,9 @@ jobs:
               SCM_DO_BUILD_DURING_DEPLOYMENT=false \
               ENABLE_ORYX_BUILD=false \
               PORT=8080 \
-              WEBSITE_RUN_FROM_PACKAGE=0
+              WEBSITE_RUN_FROM_PACKAGE=0 \
+              ORYX_DEFAULT_APP_FILE_PATH=server.js \
+              SCM_COMMAND_IDLE_TIMEOUT=7200
 
           # Configure startup file for frontend (use Node.js server)
           az webapp config set \
@@ -148,7 +150,13 @@ jobs:
             --resource-group ${{ env.AZURE_RG_NAME }} \
             --name ${{ env.AZURE_FRONTEND_APP }} \
             --web-server-logging filesystem \
-            --application-logging filesystem
+            --application-logging filesystem \
+            --level verbose
+
+          # Restart the app to apply new settings
+          az webapp restart \
+            --resource-group ${{ env.AZURE_RG_NAME }} \
+            --name ${{ env.AZURE_FRONTEND_APP }}
 
     - name: Install and Build Frontend
       run: |
@@ -184,11 +192,55 @@ jobs:
         npm install --only=production
     
     - name: Deploy Frontend
+      if: false  # Temporarily disabled - using CLI deployment instead
       uses: azure/webapps-deploy@v2
       with:
         app-name: ${{ env.AZURE_FRONTEND_APP }}
         package: frontend/dist
     
+    - name: Restart Frontend App
+      if: false  # Temporarily disabled - using CLI deployment instead
+      uses: azure/CLI@v1
+      with:
+        inlineScript: |
+          echo "🔄 Restarting frontend app to ensure new deployment is active..."
+          az webapp restart \
+            --resource-group ${{ env.AZURE_RG_NAME }} \
+            --name ${{ env.AZURE_FRONTEND_APP }}
+          echo "✅ Frontend app restarted"
+
+    - name: Alternative Frontend Deployment (CLI)
+      uses: azure/CLI@v1
+      with:
+        inlineScript: |
+          echo "🚀 Starting alternative CLI deployment for frontend..."
+          
+          # Create a deployment package
+          cd frontend/dist
+          echo "📦 Creating deployment package..."
+          zip -r ../frontend-deployment.zip . -x "*.git*" "*.gitignore*"
+          cd ..
+          
+          echo "📋 Package contents verification..."
+          unzip -l frontend-deployment.zip | head -20
+          
+          # Deploy using Azure CLI
+          echo "🎯 Deploying to Azure App Service via CLI..."
+          az webapp deployment source config-zip \
+            --resource-group ${{ env.AZURE_RG_NAME }} \
+            --name ${{ env.AZURE_FRONTEND_APP }} \
+            --src frontend-deployment.zip \
+            --timeout 600
+          
+          echo "✅ CLI deployment completed"
+          
+          # Restart the app
+          echo "🔄 Restarting frontend app..."
+          az webapp restart \
+            --resource-group ${{ env.AZURE_RG_NAME }} \
+            --name ${{ env.AZURE_FRONTEND_APP }}
+          echo "✅ Frontend app restarted"
+
     - name: Deploy Backend
       uses: azure/webapps-deploy@v2
       with:
