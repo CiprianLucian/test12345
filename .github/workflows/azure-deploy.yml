@@ -131,8 +131,9 @@ jobs:
             --settings \
               NODE_ENV=production \
               WEBSITE_NODE_DEFAULT_VERSION=~18 \
-              SCM_DO_BUILD_DURING_DEPLOYMENT=false \
-              ENABLE_ORYX_BUILD=false
+              SCM_DO_BUILD_DURING_DEPLOYMENT=true \
+              ENABLE_ORYX_BUILD=true \
+              PORT=8080
 
           # Configure startup file for frontend (use Node.js server)
           az webapp config set \
@@ -154,6 +155,9 @@ jobs:
         # Use npm install instead of npm ci to handle package-lock.json sync issues
         npm install
         npm run build
+        # Install production dependencies in the dist folder for deployment
+        cd dist
+        npm install --omit=dev
       env:
         VITE_API_URL: https://${{ env.AZURE_BACKEND_APP }}.azurewebsites.net
     
@@ -194,13 +198,31 @@ jobs:
             az webapp log download --resource-group ${{ env.AZURE_RG_NAME }} --name ${{ env.AZURE_BACKEND_APP }}
           fi
           
-          # Check frontend
+          echo ""
+          echo "Checking frontend health..."
+          
+          # Check frontend health endpoint first
+          if curl -f "$frontend_url/health"; then
+            echo "✅ Frontend health endpoint is working"
+          else
+            echo "⚠️ Frontend health endpoint failed, checking main page..."
+          fi
+          
+          # Check frontend main page
           if curl -f "$frontend_url"; then
             echo "✅ Frontend is accessible"
           else
             echo "❌ Frontend accessibility check failed"
+            echo "📋 Downloading frontend logs for debugging..."
             az webapp log download --resource-group ${{ env.AZURE_RG_NAME }} --name ${{ env.AZURE_FRONTEND_APP }}
+            
+            echo "📊 Checking app status..."
+            az webapp show --resource-group ${{ env.AZURE_RG_NAME }} --name ${{ env.AZURE_FRONTEND_APP }} --query "{state:state,hostNames:defaultHostName}" --output table
           fi
           
+          echo ""
+          echo "🔗 Application URLs:"
           echo "Backend URL: $backend_url"
+          echo "Backend Health: $backend_url/health"
           echo "Frontend URL: $frontend_url"
+          echo "Frontend Health: $frontend_url/health"
