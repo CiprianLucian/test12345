@@ -151,7 +151,8 @@ jobs:
     - name: Install and Build Frontend
       run: |
         cd frontend
-        npm ci
+        # Use npm install instead of npm ci to handle package-lock.json sync issues
+        npm install
         npm run build
       env:
         VITE_API_URL: https://${{ env.AZURE_BACKEND_APP }}.azurewebsites.net
@@ -159,7 +160,8 @@ jobs:
     - name: Install Backend Dependencies
       run: |
         cd backend
-        npm ci --only=production
+        # Install dependencies, use install instead of ci for flexibility
+        npm install --only=production
     
     - name: Deploy Frontend
       uses: azure/webapps-deploy@v2

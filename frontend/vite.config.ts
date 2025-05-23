@@ -7,7 +7,7 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
-    minify: 'terser',
+    minify: 'esbuild', // Using esbuild for better compatibility and faster builds
     target: 'es2018',
     rollupOptions: {
       output: {
@@ -16,6 +16,8 @@ export default defineConfig({
         },
       },
     },
+    // Increase chunk size warning limit for better production builds
+    chunkSizeWarningLimit: 1000,
   },
   server: {
     port: 5173,

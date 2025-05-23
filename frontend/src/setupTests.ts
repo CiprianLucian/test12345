@@ -5,9 +5,14 @@
 import '@testing-library/jest-dom/extend-expect'
 
 // Mock the environment variables for tests
-if (!import.meta.env?.VITE_API_URL) {
-  import.meta.env.VITE_API_URL = 'http://localhost:5000/api'
-};
+Object.defineProperty(import.meta, 'env', {
+  value: {
+    VITE_API_URL: 'http://localhost:5000/api',
+    MODE: 'test',
+    DEV: true
+  },
+  writable: true
+});
 
 // Mock the fetch API globally
 // This is needed because we're testing code that uses fetch
