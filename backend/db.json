@@ -1,0 +1,30 @@
+{
+  "items": [],
+  "sick_leaves": [],
+  "education_activities": [],
+  "corporate_travel": [],
+  "maintenance_issues": [],
+  "asset_bookings": [
+    {
+      "id": 1748010212596,
+      "employee_id": 1,
+      "asset_id": 1,
+      "start_date": "2025-05-23T17:23",
+      "end_date": "2025-05-24T17:23",
+      "purpose": "asd",
+      "status": "pending",
+      "created_at": "2025-05-23T14:23:32.596Z"
+    },
+    {
+      "id": 1748010316826,
+      "employee_id": 1,
+      "asset_id": 3,
+      "start_date": "2025-05-14T17:25",
+      "end_date": "2025-05-16T17:25",
+      "purpose": "asd",
+      "status": "pending",
+      "created_at": "2025-05-23T14:25:16.826Z"
+    }
+  ],
+  "expense_reports": []
+}

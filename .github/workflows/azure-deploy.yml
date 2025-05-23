@@ -1,0 +1,153 @@
+name: Deploy to Azure
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AZURE_RG_NAME: aim-possible-rg
+  AZURE_LOCATION: westeurope
+  AZURE_APP_PLAN: aim-possible-plan
+  AZURE_FRONTEND_APP: aim-possible-frontend
+  AZURE_BACKEND_APP: aim-possible-backend
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+    
+    - name: Generate package locks
+      run: |
+        cd frontend && npm install --package-lock-only
+        cd ../backend && npm install --package-lock-only
+    
+    - name: Cache frontend dependencies
+      uses: actions/cache@v3
+      with:
+        path: frontend/node_modules
+        key: frontend-deps-${{ hashFiles('frontend/package-lock.json') }}
+        restore-keys: |
+          frontend-deps-
+    
+    - name: Cache backend dependencies
+      uses: actions/cache@v3
+      with:
+        path: backend/node_modules
+        key: backend-deps-${{ hashFiles('backend/package-lock.json') }}
+        restore-keys: |
+          backend-deps-
+
+    - name: Azure login with OIDC
+      uses: azure/login@v1
+      with:
+        client-id: ${{ secrets.AZURE_CLIENT_ID }}
+        tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+        subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+    
+    - name: Create Azure resources
+      uses: azure/CLI@v1
+      with:
+        inlineScript: |
+          # Create resource group if it doesn't exist
+          az group create --name ${{ env.AZURE_RG_NAME }} --location ${{ env.AZURE_LOCATION }}
+          
+          # Create App Service Plan
+          az appservice plan create \
+            --name ${{ env.AZURE_APP_PLAN }} \
+            --resource-group ${{ env.AZURE_RG_NAME }} \
+            --sku B1 \
+            --is-linux
+            # Create Frontend Web App
+          az webapp create \
+            --name ${{ env.AZURE_FRONTEND_APP }} \
+            --resource-group ${{ env.AZURE_RG_NAME }} \
+            --plan ${{ env.AZURE_APP_PLAN }} \
+            --runtime "NODE|18-lts"
+            
+          # Set startup command for Frontend
+          az webapp config set \
+            --name ${{ env.AZURE_FRONTEND_APP }} \
+            --resource-group ${{ env.AZURE_RG_NAME }} \
+            --startup-command "npm run preview"
+            # Create Backend Web App
+          az webapp create \
+            --name ${{ env.AZURE_BACKEND_APP }} \
+            --resource-group ${{ env.AZURE_RG_NAME }} \
+            --plan ${{ env.AZURE_APP_PLAN }} \
+            --runtime "NODE|18-lts"
+            
+          # Set startup command for Backend
+          az webapp config set \
+            --name ${{ env.AZURE_BACKEND_APP }} \
+            --resource-group ${{ env.AZURE_RG_NAME }} \
+            --startup-command "npm start"
+          
+          # Configure Backend settings
+          az webapp config appsettings set \
+            --resource-group ${{ env.AZURE_RG_NAME }} \
+            --name ${{ env.AZURE_BACKEND_APP }} \
+            --settings \
+              PORT=8080 \
+              NODE_ENV=production \
+              FRONTEND_URL=https://${{ env.AZURE_FRONTEND_APP }}.azurewebsites.net
+
+          # Configure Frontend settings
+          az webapp config appsettings set \
+            --resource-group ${{ env.AZURE_RG_NAME }} \
+            --name ${{ env.AZURE_FRONTEND_APP }} \
+            --settings \
+              NODE_ENV=production
+
+          # Enable CORS for Backend
+          az webapp cors add \
+            --resource-group ${{ env.AZURE_RG_NAME }} \
+            --name ${{ env.AZURE_BACKEND_APP }} \
+            --allowed-origins https://${{ env.AZURE_FRONTEND_APP }}.azurewebsites.net
+
+          # Configure Frontend to always return index.html (for SPA routing)
+          az webapp config set \
+            --resource-group ${{ env.AZURE_RG_NAME }} \
+            --name ${{ env.AZURE_FRONTEND_APP }} \
+            --generic-configurations "{'customConfiguration': '<?xml version=\"1.0\" encoding=\"utf-8\"?><configuration><system.webServer><rewrite><rules><rule name=\"React Routes\" stopProcessing=\"true\"><match url=\".*\" /><conditions logicalGrouping=\"MatchAll\"><add input=\"{REQUEST_FILENAME}\" matchType=\"IsFile\" negate=\"true\" /><add input=\"{REQUEST_FILENAME}\" matchType=\"IsDirectory\" negate=\"true\" /></conditions><action type=\"Rewrite\" url=\"/\" /></rule></rules></rewrite></system.webServer></configuration>'}"
+
+    - name: Build Frontend
+      run: |
+        cd frontend
+        if [ ! -d "node_modules" ]; then
+          npm ci
+        fi
+        npm run build
+      env:
+        VITE_API_URL: https://${{ env.AZURE_BACKEND_APP }}.azurewebsites.net
+    
+    - name: Deploy Frontend
+      uses: azure/webapps-deploy@v2
+      with:
+        app-name: ${{ env.AZURE_FRONTEND_APP }}
+        package: frontend/dist
+    
+    - name: Prepare Backend
+      run: |
+        cd backend
+        if [ ! -d "node_modules" ]; then
+          npm ci
+        fi
+    
+    - name: Deploy Backend
+      uses: azure/webapps-deploy@v2
+      with:
+        app-name: ${{ env.AZURE_BACKEND_APP }}
+        package: backend

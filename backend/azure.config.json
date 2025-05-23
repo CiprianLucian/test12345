@@ -1,0 +1,25 @@
+# Azure deployment configuration file
+# This file helps Azure understand how to run your application
+
+{
+  "name": "aim-possible-app",
+  "platform": {
+    "apiVersion": "2018-11-01",
+    "kind": "app"
+  },
+  "properties": {
+    "framework": "node",
+    "nodeVersion": "~18",
+    "command": "npm start",
+    "appSettings": [
+      {
+        "name": "NODE_ENV",
+        "value": "production"
+      },
+      {
+        "name": "PORT",
+        "value": "8080"
+      }
+    ]
+  }
+}

@@ -1,0 +1,4 @@
+{
+  "ignore": ["*.json", "node_modules/*", ".git"],
+  "delay": "1000"
+} 
