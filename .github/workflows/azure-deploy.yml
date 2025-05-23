@@ -35,7 +35,7 @@ jobs:
         cache-dependency-path: |
           frontend/package-lock.json
           backend/package-lock.json
-    
+
     - name: Azure login with OIDC
       uses: azure/login@v1
       with:
@@ -67,19 +67,19 @@ jobs:
             --sku B1 \
             --is-linux || echo "App Service Plan already exists"
 
-          # Create Frontend Web App
-          az webapp create \
-            --name ${{ env.AZURE_FRONTEND_APP }} \
-            --resource-group ${{ env.AZURE_RG_NAME }} \
-            --plan ${{ env.AZURE_APP_PLAN }} \
-            --runtime "NODE|18-lts" || echo "Frontend app already exists"
-            
-          # Create Backend Web App
+          # Create Backend Web App (Node.js)
           az webapp create \
             --name ${{ env.AZURE_BACKEND_APP }} \
             --resource-group ${{ env.AZURE_RG_NAME }} \
             --plan ${{ env.AZURE_APP_PLAN }} \
             --runtime "NODE|18-lts" || echo "Backend app already exists"
+
+          # Create Frontend Web App (Static files)
+          az webapp create \
+            --name ${{ env.AZURE_FRONTEND_APP }} \
+            --resource-group ${{ env.AZURE_RG_NAME }} \
+            --plan ${{ env.AZURE_APP_PLAN }} \
+            --runtime "NODE|18-lts" || echo "Frontend app already exists"
 
     - name: Configure Backend Web App
       uses: azure/CLI@v1
@@ -97,7 +97,7 @@ jobs:
               SCM_DO_BUILD_DURING_DEPLOYMENT=true \
               ENABLE_ORYX_BUILD=true
 
-          # Configure startup command for backend
+          # Configure startup file for backend
           az webapp config set \
             --name ${{ env.AZURE_BACKEND_APP }} \
             --resource-group ${{ env.AZURE_RG_NAME }} \
@@ -124,7 +124,7 @@ jobs:
       uses: azure/CLI@v1
       with:
         inlineScript: |
-          # Configure Frontend App Settings
+          # Configure Frontend App Settings for serving static files
           az webapp config appsettings set \
             --resource-group ${{ env.AZURE_RG_NAME }} \
             --name ${{ env.AZURE_FRONTEND_APP }} \
@@ -134,11 +134,11 @@ jobs:
               SCM_DO_BUILD_DURING_DEPLOYMENT=false \
               ENABLE_ORYX_BUILD=false
 
-          # Configure startup command for frontend (serve static files with fallback)
+          # Configure startup file for frontend (use Node.js server)
           az webapp config set \
             --name ${{ env.AZURE_FRONTEND_APP }} \
             --resource-group ${{ env.AZURE_RG_NAME }} \
-            --startup-file "npm start" \
+            --startup-file "node server.js" \
             --always-on true
 
           # Enable logging
