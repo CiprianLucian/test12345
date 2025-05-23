@@ -131,9 +131,10 @@ jobs:
             --settings \
               NODE_ENV=production \
               WEBSITE_NODE_DEFAULT_VERSION=~18 \
-              SCM_DO_BUILD_DURING_DEPLOYMENT=true \
-              ENABLE_ORYX_BUILD=true \
-              PORT=8080
+              SCM_DO_BUILD_DURING_DEPLOYMENT=false \
+              ENABLE_ORYX_BUILD=false \
+              PORT=8080 \
+              WEBSITE_RUN_FROM_PACKAGE=1
 
           # Configure startup file for frontend (use Node.js server)
           az webapp config set \
