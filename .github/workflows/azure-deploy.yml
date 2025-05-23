@@ -6,9 +6,11 @@ on:
       - main
   workflow_dispatch:
 
+# These permissions are needed for OIDC authentication
 permissions:
-  id-token: write
-  contents: read
+  id-token: write # This is required for OIDC
+  contents: read  # This is required to checkout the code
+  pull-requests: write # This is required for commenting on PRs
 
 env:
   AZURE_RG_NAME: aim-possible-rg
@@ -56,6 +58,16 @@ jobs:
         client-id: ${{ secrets.AZURE_CLIENT_ID }}
         tenant-id: ${{ secrets.AZURE_TENANT_ID }}
         subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        enable-AzPSSession: false # We don't need PowerShell
+        audience: api://AzureADTokenExchange # This is the default audience for OIDC
+
+    - name: Validate Azure access
+      uses: azure/CLI@v1
+      with:
+        inlineScript: |
+          # Verify we have the correct permissions
+          az account show
+          az group show --name ${{ env.AZURE_RG_NAME }} || echo "Resource group does not exist yet"
     
     - name: Create Azure resources
       uses: azure/CLI@v1
@@ -70,30 +82,34 @@ jobs:
             --resource-group ${{ env.AZURE_RG_NAME }} \
             --sku B1 \
             --is-linux
-            # Create Frontend Web App
+
+          # Create Frontend Web App
           az webapp create \
             --name ${{ env.AZURE_FRONTEND_APP }} \
             --resource-group ${{ env.AZURE_RG_NAME }} \
             --plan ${{ env.AZURE_APP_PLAN }} \
             --runtime "NODE|18-lts"
             
-          # Set startup command for Frontend
+          # Configure Frontend App Settings
           az webapp config set \
             --name ${{ env.AZURE_FRONTEND_APP }} \
             --resource-group ${{ env.AZURE_RG_NAME }} \
-            --startup-command "npm run preview"
-            # Create Backend Web App
+            --startup-file "npm run preview" \
+            --always-on true
+
+          # Create Backend Web App
           az webapp create \
             --name ${{ env.AZURE_BACKEND_APP }} \
             --resource-group ${{ env.AZURE_RG_NAME }} \
             --plan ${{ env.AZURE_APP_PLAN }} \
             --runtime "NODE|18-lts"
             
-          # Set startup command for Backend
+          # Configure Backend App Settings
           az webapp config set \
             --name ${{ env.AZURE_BACKEND_APP }} \
             --resource-group ${{ env.AZURE_RG_NAME }} \
-            --startup-command "npm start"
+            --startup-file "npm start" \
+            --always-on true
           
           # Configure Backend settings
           az webapp config appsettings set \
