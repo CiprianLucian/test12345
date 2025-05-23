@@ -136,7 +136,8 @@ jobs:
               PORT=8080 \
               WEBSITE_RUN_FROM_PACKAGE=0 \
               ORYX_DEFAULT_APP_FILE_PATH=server.js \
-              SCM_COMMAND_IDLE_TIMEOUT=7200
+              SCM_COMMAND_IDLE_TIMEOUT=7200 \
+              WEBSITE_DISABLE_SCM_SEPARATION=true
 
           # Configure startup file for frontend (use Node.js server)
           az webapp config set \
@@ -191,51 +192,99 @@ jobs:
         # Install dependencies, use install instead of ci for flexibility
         npm install --only=production
     
+    - name: Pre-deployment Package Verification
+      run: |
+        echo "🔍 Pre-deployment verification..."
+        echo "📦 Checking frontend/dist folder structure:"
+        find frontend/dist -type f -name "*.js" -o -name "*.html" -o -name "*.json" | head -10
+        
+        echo ""
+        echo "📋 Verifying required files exist:"
+        
+        if [ -f "frontend/dist/index.html" ]; then
+          echo "✅ index.html exists"
+        else
+          echo "❌ index.html missing"
+          exit 1
+        fi
+        
+        if [ -f "frontend/dist/server.js" ]; then
+          echo "✅ server.js exists"
+        else
+          echo "❌ server.js missing"
+          exit 1
+        fi
+        
+        if [ -f "frontend/dist/package.json" ]; then
+          echo "✅ package.json exists"
+          echo "📋 Package.json contents:"
+          cat frontend/dist/package.json
+        else
+          echo "❌ package.json missing"
+          exit 1
+        fi
+        
+        if [ -d "frontend/dist/node_modules" ]; then
+          echo "✅ node_modules exists"
+          echo "📦 Node modules count: $(ls -1 frontend/dist/node_modules | wc -l)"
+        else
+          echo "❌ node_modules missing"
+          exit 1
+        fi
+        
+        echo "🎉 Pre-deployment verification passed!"
+    
     - name: Deploy Frontend
-      if: false  # Temporarily disabled - using CLI deployment instead
       uses: azure/webapps-deploy@v2
       with:
         app-name: ${{ env.AZURE_FRONTEND_APP }}
         package: frontend/dist
+      continue-on-error: true
+      id: frontend_deploy
     
+    - name: Check Deployment Status and Logs
+      uses: azure/CLI@v1
+      with:
+        inlineScript: |
+          echo "🔍 Checking deployment status..."
+          
+          # Check deployment status
+          echo "📊 App Service status:"
+          az webapp show \
+            --resource-group ${{ env.AZURE_RG_NAME }} \
+            --name ${{ env.AZURE_FRONTEND_APP }} \
+            --query "{name:name,state:state,hostNames:hostNames,defaultHostName:defaultHostName}" \
+            --output table
+          
+          # Get recent deployment logs
+          echo "📋 Recent deployment logs:"
+          az webapp log deployment list \
+            --resource-group ${{ env.AZURE_RG_NAME }} \
+            --name ${{ env.AZURE_FRONTEND_APP }} \
+            --output table || echo "No deployment logs available"
+          
+          # Get application logs
+          echo "📋 Application logs (last 50 lines):"
+          az webapp log tail \
+            --resource-group ${{ env.AZURE_RG_NAME }} \
+            --name ${{ env.AZURE_FRONTEND_APP }} \
+            --provider application \
+            --output table || echo "No application logs available"
+          
+          # Check if deployment failed and get detailed info
+          if [ "${{ steps.frontend_deploy.outcome }}" = "failure" ]; then
+            echo "❌ Deployment failed. Getting detailed information..."
+            az webapp deployment list \
+              --resource-group ${{ env.AZURE_RG_NAME }} \
+              --name ${{ env.AZURE_FRONTEND_APP }} \
+              --output table
+          fi
+
     - name: Restart Frontend App
-      if: false  # Temporarily disabled - using CLI deployment instead
       uses: azure/CLI@v1
       with:
         inlineScript: |
           echo "🔄 Restarting frontend app to ensure new deployment is active..."
-          az webapp restart \
-            --resource-group ${{ env.AZURE_RG_NAME }} \
-            --name ${{ env.AZURE_FRONTEND_APP }}
-          echo "✅ Frontend app restarted"
-
-    - name: Alternative Frontend Deployment (CLI)
-      uses: azure/CLI@v1
-      with:
-        inlineScript: |
-          echo "🚀 Starting alternative CLI deployment for frontend..."
-          
-          # Create a deployment package
-          cd frontend/dist
-          echo "📦 Creating deployment package..."
-          zip -r ../frontend-deployment.zip . -x "*.git*" "*.gitignore*"
-          cd ..
-          
-          echo "📋 Package contents verification..."
-          unzip -l frontend-deployment.zip | head -20
-          
-          # Deploy using Azure CLI
-          echo "🎯 Deploying to Azure App Service via CLI..."
-          az webapp deployment source config-zip \
-            --resource-group ${{ env.AZURE_RG_NAME }} \
-            --name ${{ env.AZURE_FRONTEND_APP }} \
-            --src frontend-deployment.zip \
-            --timeout 600
-          
-          echo "✅ CLI deployment completed"
-          
-          # Restart the app
-          echo "🔄 Restarting frontend app..."
           az webapp restart \
             --resource-group ${{ env.AZURE_RG_NAME }} \
             --name ${{ env.AZURE_FRONTEND_APP }}
