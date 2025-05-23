@@ -18,40 +18,24 @@ env:
   AZURE_APP_PLAN: aim-possible-plan
   AZURE_FRONTEND_APP: aim-possible-frontend
   AZURE_BACKEND_APP: aim-possible-backend
+  NODE_VERSION: '18'
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     
     - name: Set up Node.js
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v4
       with:
-        node-version: '18'
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: |
+          frontend/package-lock.json
+          backend/package-lock.json
     
-    - name: Generate package locks
-      run: |
-        cd frontend && npm install --package-lock-only
-        cd ../backend && npm install --package-lock-only
-    
-    - name: Cache frontend dependencies
-      uses: actions/cache@v3
-      with:
-        path: frontend/node_modules
-        key: frontend-deps-${{ hashFiles('frontend/package-lock.json') }}
-        restore-keys: |
-          frontend-deps-
-    
-    - name: Cache backend dependencies
-      uses: actions/cache@v3
-      with:
-        path: backend/node_modules
-        key: backend-deps-${{ hashFiles('backend/package-lock.json') }}
-        restore-keys: |
-          backend-deps-
-
     - name: Azure login with OIDC
       uses: azure/login@v1
       with:
@@ -81,73 +65,101 @@ jobs:
             --name ${{ env.AZURE_APP_PLAN }} \
             --resource-group ${{ env.AZURE_RG_NAME }} \
             --sku B1 \
-            --is-linux
+            --is-linux || echo "App Service Plan already exists"
 
           # Create Frontend Web App
           az webapp create \
             --name ${{ env.AZURE_FRONTEND_APP }} \
             --resource-group ${{ env.AZURE_RG_NAME }} \
             --plan ${{ env.AZURE_APP_PLAN }} \
-            --runtime "NODE|18-lts"
+            --runtime "NODE|18-lts" || echo "Frontend app already exists"
             
-          # Configure Frontend App Settings
-          az webapp config set \
-            --name ${{ env.AZURE_FRONTEND_APP }} \
-            --resource-group ${{ env.AZURE_RG_NAME }} \
-            --startup-file "npm run preview" \
-            --always-on true
-
           # Create Backend Web App
           az webapp create \
             --name ${{ env.AZURE_BACKEND_APP }} \
             --resource-group ${{ env.AZURE_RG_NAME }} \
             --plan ${{ env.AZURE_APP_PLAN }} \
-            --runtime "NODE|18-lts"
-            
-          # Configure Backend App Settings
-          az webapp config set \
-            --name ${{ env.AZURE_BACKEND_APP }} \
-            --resource-group ${{ env.AZURE_RG_NAME }} \
-            --startup-file "npm start" \
-            --always-on true
-          
-          # Configure Backend settings
+            --runtime "NODE|18-lts" || echo "Backend app already exists"
+
+    - name: Configure Backend Web App
+      uses: azure/CLI@v1
+      with:
+        inlineScript: |
+          # Configure Backend App Settings and Environment Variables
           az webapp config appsettings set \
             --resource-group ${{ env.AZURE_RG_NAME }} \
             --name ${{ env.AZURE_BACKEND_APP }} \
             --settings \
               PORT=8080 \
               NODE_ENV=production \
-              FRONTEND_URL=https://${{ env.AZURE_FRONTEND_APP }}.azurewebsites.net
+              FRONTEND_URL=https://${{ env.AZURE_FRONTEND_APP }}.azurewebsites.net \
+              WEBSITE_NODE_DEFAULT_VERSION=~18 \
+              SCM_DO_BUILD_DURING_DEPLOYMENT=true \
+              ENABLE_ORYX_BUILD=true
 
-          # Configure Frontend settings
+          # Configure startup command for backend
+          az webapp config set \
+            --name ${{ env.AZURE_BACKEND_APP }} \
+            --resource-group ${{ env.AZURE_RG_NAME }} \
+            --startup-file "node index.js" \
+            --always-on true
+
+          # Enable logging
+          az webapp log config \
+            --resource-group ${{ env.AZURE_RG_NAME }} \
+            --name ${{ env.AZURE_BACKEND_APP }} \
+            --web-server-logging filesystem \
+            --application-logging filesystem
+
+          # Configure CORS for Backend
+          az webapp cors add \
+            --resource-group ${{ env.AZURE_RG_NAME }} \
+            --name ${{ env.AZURE_BACKEND_APP }} \
+            --allowed-origins \
+              https://${{ env.AZURE_FRONTEND_APP }}.azurewebsites.net \
+              http://localhost:5173 \
+              http://localhost:4173
+
+    - name: Configure Frontend Web App
+      uses: azure/CLI@v1
+      with:
+        inlineScript: |
+          # Configure Frontend App Settings
           az webapp config appsettings set \
             --resource-group ${{ env.AZURE_RG_NAME }} \
             --name ${{ env.AZURE_FRONTEND_APP }} \
             --settings \
-              NODE_ENV=production
+              NODE_ENV=production \
+              WEBSITE_NODE_DEFAULT_VERSION=~18 \
+              SCM_DO_BUILD_DURING_DEPLOYMENT=false \
+              ENABLE_ORYX_BUILD=false
 
-          # Enable CORS for Backend
-          az webapp cors add \
-            --resource-group ${{ env.AZURE_RG_NAME }} \
-            --name ${{ env.AZURE_BACKEND_APP }} \
-            --allowed-origins https://${{ env.AZURE_FRONTEND_APP }}.azurewebsites.net
-
-          # Configure Frontend to always return index.html (for SPA routing)
+          # Configure startup command for frontend (serve static files with fallback)
           az webapp config set \
+            --name ${{ env.AZURE_FRONTEND_APP }} \
+            --resource-group ${{ env.AZURE_RG_NAME }} \
+            --startup-file "npm start" \
+            --always-on true
+
+          # Enable logging
+          az webapp log config \
             --resource-group ${{ env.AZURE_RG_NAME }} \
             --name ${{ env.AZURE_FRONTEND_APP }} \
-            --generic-configurations "{'customConfiguration': '<?xml version=\"1.0\" encoding=\"utf-8\"?><configuration><system.webServer><rewrite><rules><rule name=\"React Routes\" stopProcessing=\"true\"><match url=\".*\" /><conditions logicalGrouping=\"MatchAll\"><add input=\"{REQUEST_FILENAME}\" matchType=\"IsFile\" negate=\"true\" /><add input=\"{REQUEST_FILENAME}\" matchType=\"IsDirectory\" negate=\"true\" /></conditions><action type=\"Rewrite\" url=\"/\" /></rule></rules></rewrite></system.webServer></configuration>'}"
+            --web-server-logging filesystem \
+            --application-logging filesystem
 
-    - name: Build Frontend
+    - name: Install and Build Frontend
       run: |
         cd frontend
-        if [ ! -d "node_modules" ]; then
-          npm ci
-        fi
+        npm ci
         npm run build
       env:
         VITE_API_URL: https://${{ env.AZURE_BACKEND_APP }}.azurewebsites.net
+    
+    - name: Install Backend Dependencies
+      run: |
+        cd backend
+        npm ci --only=production
     
     - name: Deploy Frontend
       uses: azure/webapps-deploy@v2
@@ -155,15 +167,38 @@ jobs:
         app-name: ${{ env.AZURE_FRONTEND_APP }}
         package: frontend/dist
     
-    - name: Prepare Backend
-      run: |
-        cd backend
-        if [ ! -d "node_modules" ]; then
-          npm ci
-        fi
-    
     - name: Deploy Backend
       uses: azure/webapps-deploy@v2
       with:
         app-name: ${{ env.AZURE_BACKEND_APP }}
         package: backend
+
+    - name: Verify Deployment
+      uses: azure/CLI@v1
+      with:
+        inlineScript: |
+          echo "Checking backend health..."
+          backend_url="https://${{ env.AZURE_BACKEND_APP }}.azurewebsites.net"
+          frontend_url="https://${{ env.AZURE_FRONTEND_APP }}.azurewebsites.net"
+          
+          # Wait a moment for deployment to complete
+          sleep 30
+          
+          # Check backend health
+          if curl -f "$backend_url/health"; then
+            echo "✅ Backend is healthy"
+          else
+            echo "❌ Backend health check failed"
+            az webapp log download --resource-group ${{ env.AZURE_RG_NAME }} --name ${{ env.AZURE_BACKEND_APP }}
+          fi
+          
+          # Check frontend
+          if curl -f "$frontend_url"; then
+            echo "✅ Frontend is accessible"
+          else
+            echo "❌ Frontend accessibility check failed"
+            az webapp log download --resource-group ${{ env.AZURE_RG_NAME }} --name ${{ env.AZURE_FRONTEND_APP }}
+          fi
+          
+          echo "Backend URL: $backend_url"
+          echo "Frontend URL: $frontend_url"

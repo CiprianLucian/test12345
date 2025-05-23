@@ -1,6 +1,5 @@
 import { render, screen } from '@testing-library/react';
 import SickLeaveRequestForm from '../SickLeaveRequestForm';
-import * as api from '../../services/api';
 import '@testing-library/jest-dom';
 
 // Mock the API functions

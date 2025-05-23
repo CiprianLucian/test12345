@@ -1,11 +1,9 @@
 import { useState, useEffect } from 'react'
-import { BrowserRouter as Router, Routes, Route, Link, useNavigate } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom'
 import axios from 'axios'
 import './App.css'
 import SickLeavePage from './pages/SickLeavePage'
-
-// API base URL
-const API_URL = 'http://localhost:5000/api';
+import API_URL from './config'
 
 // Home Page Component
 function HomePage() {
@@ -223,8 +221,6 @@ export function AssetBookingPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
   const [activeTab, setActiveTab] = useState('book'); // 'book', 'myBookings', or 'allBookings'
-  
-  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
   
   // For this demo, we'll use a static employee ID
   const EMPLOYEE_ID = 1;

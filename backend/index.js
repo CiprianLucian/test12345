@@ -12,13 +12,42 @@ const PORT = process.env.PORT || 5000;
 
 // Production configuration
 const isProduction = process.env.NODE_ENV === 'production';
-const FRONTEND_URL = isProduction 
-  ? 'https://aim-possible-frontend.azurewebsites.net'
-  : 'http://localhost:5173';
+const FRONTEND_URL = process.env.FRONTEND_URL || 
+  (isProduction 
+    ? process.env.WEBSITE_HOSTNAME 
+      ? `https://${process.env.WEBSITE_HOSTNAME}` 
+      : 'https://aim-possible-frontend.azurewebsites.net'
+    : 'http://localhost:5173');
 
-// CORS configuration
+console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+console.log(`Frontend URL: ${FRONTEND_URL}`);
+console.log(`Server will run on port: ${PORT}`);
+
+// CORS configuration - Allow multiple origins for Azure flexibility
 const corsOptions = {
-  origin: FRONTEND_URL,
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    const allowedOrigins = [
+      FRONTEND_URL,
+      'https://aim-possible-frontend.azurewebsites.net',
+      'http://localhost:5173',
+      'http://localhost:4173'
+    ];
+    
+    // Add current hostname if available
+    if (process.env.WEBSITE_HOSTNAME) {
+      allowedOrigins.push(`https://${process.env.WEBSITE_HOSTNAME}`);
+    }
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log(`CORS blocked origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
@@ -34,7 +63,9 @@ app.get('/health', (req, res) => {
   res.json({ 
     status: 'healthy',
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development'
+    environment: process.env.NODE_ENV || 'development',
+    port: PORT,
+    frontend_url: FRONTEND_URL
   });
 });
 
@@ -43,14 +74,22 @@ if (isProduction) {
   app.use(express.static(path.join(__dirname, 'public')));
 }
 
-// Ensure the db directory exists
-const dbDir = path.resolve(__dirname, './db');
+// Ensure the db directory exists - use a path that works in Azure
+const dbDir = process.env.HOME 
+  ? path.join(process.env.HOME, 'data') 
+  : path.resolve(__dirname, './db');
+
 if (!fs.existsSync(dbDir)) {
   fs.mkdirSync(dbDir, { recursive: true });
 }
 
-// Use a different database path for testing
-const dbPath = process.env.DB_PATH || './database.sqlite';
+// Use a database path that persists in Azure App Service
+const dbPath = process.env.DB_PATH || 
+  (process.env.HOME 
+    ? path.join(process.env.HOME, 'data', 'database.sqlite')
+    : './database.sqlite');
+
+console.log(`Database path: ${dbPath}`);
 
 // Initialize SQLite database
 const db = new sqlite3.Database(dbPath, (err) => {
@@ -66,8 +105,14 @@ const db = new sqlite3.Database(dbPath, (err) => {
   }
 });
 
-// Initialize JSON database for asset bookings
-const adapter = new FileSync('db.json');
+// Initialize JSON database for asset bookings - use persistent path
+const jsonDbPath = process.env.HOME 
+  ? path.join(process.env.HOME, 'data', 'db.json')
+  : 'db.json';
+
+console.log(`JSON database path: ${jsonDbPath}`);
+
+const adapter = new FileSync(jsonDbPath);
 const jsonDb = low(adapter);
 
 // Set defaults (required if JSON file is empty)

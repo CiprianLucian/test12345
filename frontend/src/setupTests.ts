@@ -2,7 +2,12 @@
 // allows you to do things like:
 // expect(element).toHaveTextContent(/react/i)
 // learn more: https://github.com/testing-library/jest-dom
-import '@testing-library/jest-dom';
+import '@testing-library/jest-dom/extend-expect'
+
+// Mock the environment variables for tests
+if (!import.meta.env?.VITE_API_URL) {
+  import.meta.env.VITE_API_URL = 'http://localhost:5000/api'
+};
 
 // Mock the fetch API globally
 // This is needed because we're testing code that uses fetch

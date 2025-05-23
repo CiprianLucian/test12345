@@ -125,9 +125,8 @@ const SickLeaveRequestForm = ({ onRequestSubmitted }: SickLeaveRequestFormProps)
     
     setLoading(true);
     setError(null);
-    
-    try {
-      const response = await createSickLeaveRequest(formData);
+      try {
+      await createSickLeaveRequest(formData);
       
       setSuccess('Sick leave request submitted successfully!');
       setFormData({

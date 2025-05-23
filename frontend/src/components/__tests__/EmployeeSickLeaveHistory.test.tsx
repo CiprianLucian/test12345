@@ -1,8 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import EmployeeSickLeaveHistory from '../EmployeeSickLeaveHistory';
-import * as api from '../../services/api';
 import '@testing-library/jest-dom';
-import type { SickLeaveRequest } from '../../types';
 
 // Mock the API functions
 jest.mock('../../services/api', () => ({
